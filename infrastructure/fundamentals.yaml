@@ -1,0 +1,198 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Infraestructura fundamental para el sistema de pedidos'
+
+Resources:
+  OrdersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: orders-table
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: order_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: order_id
+          KeyType: HASH
+      Tags:
+        - Key: Environment
+          Value: production
+        - Key: Application
+          Value: order-management
+
+  OrderRequestLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: order-request-lambda-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                Resource: !GetAtt OrdersTable.Arn
+
+  OrderRequestLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: order-request
+      Runtime: python3.11
+      Handler: index.lambda_handler
+      Role: !GetAtt OrderRequestLambdaRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          def lambda_handler(event, context):
+              return {'statusCode': 200, 'body': json.dumps('Placeholder')}
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !Ref OrdersTable
+      Timeout: 30
+      MemorySize: 128
+      Tags:
+        - Key: Environment
+          Value: production
+        - Key: Application
+          Value: order-management
+
+  OrderRequestLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref OrderRequestLambda
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${OrdersApi}/*/*
+
+  OrdersApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: orders-api
+      Description: API Gateway para el sistema de pedidos
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+      Tags:
+        - Key: Environment
+          Value: production
+        - Key: Application
+          Value: order-management
+
+  OrdersApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref OrdersApi
+      ParentId: !GetAtt OrdersApi.RootResourceId
+      PathPart: orders
+
+  OrdersApiMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref OrdersApi
+      ResourceId: !Ref OrdersApiResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OrderRequestLambda.Arn}/invocations
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+
+  OrdersApiOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref OrdersApi
+      ResourceId: !Ref OrdersApiResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  OrdersApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - OrdersApiMethod
+      - OrdersApiOptionsMethod
+    Properties:
+      RestApiId: !Ref OrdersApi
+
+  OrdersApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref OrdersApi
+      DeploymentId: !Ref OrdersApiDeployment
+      StageName: prod
+      Description: Producción
+      Tags:
+        - Key: Environment
+          Value: production
+        - Key: Application
+          Value: order-management
+
+Outputs:
+  OrdersTableName:
+    Description: Nombre de la tabla DynamoDB de pedidos
+    Value: !Ref OrdersTable
+    Export:
+      Name: OrdersTableName
+  
+  OrdersTableArn:
+    Description: ARN de la tabla DynamoDB de pedidos
+    Value: !GetAtt OrdersTable.Arn
+    Export:
+      Name: OrdersTableArn
+  
+  OrderRequestLambdaArn:
+    Description: ARN de la función Lambda order-request
+    Value: !GetAtt OrderRequestLambda.Arn
+    Export:
+      Name: OrderRequestLambdaArn
+  
+  OrderRequestLambdaName:
+    Description: Nombre de la función Lambda order-request
+    Value: !Ref OrderRequestLambda
+    Export:
+      Name: OrderRequestLambdaName
+  
+  OrdersApiUrl:
+    Description: URL del API Gateway para pedidos
+    Value: !Sub https://${OrdersApi}.execute-api.${AWS::Region}.amazonaws.com/prod/orders
+    Export:
+      Name: OrdersApiUrl
+  
+  OrdersApiId:
+    Description: ID del API Gateway
+    Value: !Ref OrdersApi
+    Export:
+      Name: OrdersApiId
