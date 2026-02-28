@@ -43,3 +43,6 @@ jobs:
         with:
           name: ash-results
           path: .ash/ash_output
+      
+      - name: Demo - Hola Mundo
+        run: echo "Hola Mundo"
