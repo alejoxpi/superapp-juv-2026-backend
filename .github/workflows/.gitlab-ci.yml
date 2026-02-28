@@ -46,3 +46,9 @@ jobs:
       
       - name: Demo - Hola Mundo
         run: echo "Hola Mundo"
+
+  parallel-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Imprimir paralelo
+        run: echo "paralelo"
